@@ -1,53 +1,113 @@
-#!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
+from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
-import time
+from cv_bridge import CvBridge
+import cv2
+import numpy as np
 
-class TurtlebotForwardNode(Node):
+class ColorDetectorNode(Node):
     def __init__(self):
-        super().__init__('turtlebot_forward_node')
-        self.publisher = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.timer = self.create_timer(0.5, self.timer_callback)
-        self.distance = 2.0  # Distanz in Metern
-        self.linear_speed = 0.2  # m/s
-        self.duration = self.distance / self.linear_speed  # Dauer in Sekunden
-        self.start_time = None
-        self.is_moving = False
-        self.get_logger().info('Turtlebot Forward Node gestartet')
+        super().__init__('color_detector_node')
         
-    def timer_callback(self):
-        if not self.is_moving:
-            self.move_forward()
-            
-    def move_forward(self):
-        self.get_logger().info(f'Starte Bewegung: {self.distance} Meter vorwärts')
-        self.is_moving = True
-        self.start_time = time.time()
+        self.bridge = CvBridge()
+        self.image_sub = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        # Schleife für die Bewegung
-        while time.time() - self.start_time < self.duration:
-            msg = Twist()
-            msg.linear.x = self.linear_speed
-            msg.angular.z = 0.0
-            self.publisher.publish(msg)
-            time.sleep(0.1)  # kleine Pause zwischen den Befehlen
+        # State machine
+        self.state = "SEARCHING"  # SEARCHING, APPROACHING, STOPPED
+        self.last_detection_time = self.get_clock().now()
+        
+        # Color detection parameters (Rot in HSV)
+        self.lower_red1 = np.array([0, 100, 100])
+        self.upper_red1 = np.array([10, 255, 255])
+        self.lower_red2 = np.array([160, 100, 100])
+        self.upper_red2 = np.array([180, 255, 255])
+        
+        # Control parameters
+        self.target_distance = 0.20  # 20 cm
+        self.min_contour_area = 500
+        self.spin_speed = 0.5  # rad/s
+        self.approach_speed = 0.15  # m/s
+        self.hysteresis = 0.05  # 5 cm Toleranz
+        
+        self.get_logger().info("Farbdetektor gestartet")
+
+    def image_callback(self, msg):
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
             
-        # Stoppen des Roboters
-        stop_msg = Twist()
-        stop_msg.linear.x = 0.0
-        stop_msg.angular.z = 0.0
-        self.publisher.publish(stop_msg)
-        self.get_logger().info('Bewegung beendet')
-        self.is_moving = False
-        # Optional: Node beenden nach der Aufgabe
-        # rclpy.shutdown()
+            # Rote Maske erstellen
+            mask1 = cv2.inRange(hsv, self.lower_red1, self.upper_red1)
+            mask2 = cv2.inRange(hsv, self.lower_red2, self.upper_red2)
+            red_mask = cv2.bitwise_or(mask1, mask2)
+            
+            # Konturen finden
+            contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            largest_contour = max(contours, key=cv2.contourArea, default=None)
+            
+            twist = Twist()
+            
+            if self.state == "SEARCHING":
+                twist.angular.z = self.spin_speed  # Im Kreis drehen
+                
+                if largest_contour is not None and cv2.contourArea(largest_contour) > self.min_contour_area:
+                    self.state = "APPROACHING"
+                    self.get_logger().info("Rot erkannt! Starte Annäherung")
+            
+            elif self.state == "APPROACHING":
+                if largest_contour is None or cv2.contourArea(largest_contour) < self.min_contour_area:
+                    self.state = "SEARCHING"
+                    self.get_logger().warn("Objekt verloren! Zurück zur Suche")
+                    return
+                
+                # Distanzschätzung
+                M = cv2.moments(largest_contour)
+                cx = int(M["m10"]/M["m00"])
+                cy = int(M["m01"]/M["m00"])
+                
+                # Einfache Distanzschätzung (Annahme: Kamera horizontal)
+                pixel_height = cv2.boundingRect(largest_contour)[3]
+                estimated_distance = (120 * 0.1) / pixel_height  # Kalibrierungswert anpassen
+                
+                # Regler für die Ausrichtung
+                center_x = cv_image.shape[1] // 2
+                angular_z = -0.005 * (cx - center_x)
+                
+                if estimated_distance > self.target_distance + self.hysteresis:
+                    twist.linear.x = self.approach_speed
+                    twist.angular.z = angular_z
+                elif estimated_distance < self.target_distance - self.hysteresis:
+                    twist.linear.x = -0.05  # Leicht zurückfahren
+                else:
+                    self.state = "STOPPED"
+                    self.get_logger().info("Ziel erreicht! Halte an")
+            
+            elif self.state == "STOPPED":
+                pass  # Keine Bewegung
+                
+            self.cmd_vel_pub.publish(twist)
+            
+            # Debug-Ansicht
+            cv2.drawContours(cv_image, [largest_contour], -1, (0,255,0), 2) if largest_contour else None
+            cv2.imshow("Kamera", cv_image)
+            cv2.waitKey(1)
+            
+        except Exception as e:
+            self.get_logger().error(f"Fehler: {str(e)}")
+            self.state = "SEARCHING"
 
 def main(args=None):
     rclpy.init(args=args)
-    node = TurtlebotForwardNode()
-    rclpy.spin(node)
+    node = ColorDetectorNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    
+    # Cleanup
+    cv2.destroyAllWindows()
     node.destroy_node()
     rclpy.shutdown()
 

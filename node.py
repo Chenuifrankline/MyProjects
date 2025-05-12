@@ -1,114 +1,60 @@
 import rclpy
 from rclpy.node import Node
+from std_msgs.msg import String
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
 
-class ColorDetectorNode(Node):
+class ObjectTracker(Node):
     def __init__(self):
-        super().__init__('color_detector_node')
-        
+        super().__init__('object_tracker')
+        self.publisher_ = self.create_publisher(String, 'object_coordinates', 10)
+        self.image_publisher_ = self.create_publisher(Image, 'object_tracking/image_raw', 10)
+        self.subscription = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
+        self.back_sub = cv2.createBackgroundSubtractorMOG2(history=700, varThreshold=25, detectShadows=True)
+        self.kernel = np.ones((20,20),np.uint8)
         self.bridge = CvBridge()
-        self.image_sub = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        
-        # State machine
-        self.state = "SEARCHING"  # SEARCHING, APPROACHING, STOPPED
-        self.last_detection_time = self.get_clock().now()
-        
-        # Color detection parameters (Rot in HSV)
-        self.lower_red1 = np.array([0, 100, 100])
-        self.upper_red1 = np.array([10, 255, 255])
-        self.lower_red2 = np.array([160, 100, 100])
-        self.upper_red2 = np.array([180, 255, 255])
-        
-        # Control parameters
-        self.target_distance = 0.20  # 20 cm
-        self.min_contour_area = 500
-        self.spin_speed = 0.5  # rad/s
-        self.approach_speed = 0.15  # m/s
-        self.hysteresis = 0.05  # 5 cm Toleranz
-        
-        self.get_logger().info("Farbdetektor gestartet")
 
     def image_callback(self, msg):
-        try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-            
-            # Rote Maske erstellen
-            mask1 = cv2.inRange(hsv, self.lower_red1, self.upper_red1)
-            mask2 = cv2.inRange(hsv, self.lower_red2, self.upper_red2)
-            red_mask = cv2.bitwise_or(mask1, mask2)
-            
-            # Konturen finden
-            contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            largest_contour = max(contours, key=cv2.contourArea, default=None)
-            
-            twist = Twist()
-            
-            if self.state == "SEARCHING":
-                twist.angular.z = self.spin_speed  # Im Kreis drehen
-                
-                if largest_contour is not None and cv2.contourArea(largest_contour) > self.min_contour_area:
-                    self.state = "APPROACHING"
-                    self.get_logger().info("Rot erkannt! Starte Annäherung")
-            
-            elif self.state == "APPROACHING":
-                if largest_contour is None or cv2.contourArea(largest_contour) < self.min_contour_area:
-                    self.state = "SEARCHING"
-                    self.get_logger().warn("Objekt verloren! Zurück zur Suche")
-                    return
-                
-                # Distanzschätzung
-                M = cv2.moments(largest_contour)
-                cx = int(M["m10"]/M["m00"])
-                cy = int(M["m01"]/M["m00"])
-                
-                # Einfache Distanzschätzung (Annahme: Kamera horizontal)
-                pixel_height = cv2.boundingRect(largest_contour)[3]
-                estimated_distance = (120 * 0.1) / pixel_height  # Kalibrierungswert anpassen
-                
-                # Regler für die Ausrichtung
-                center_x = cv_image.shape[1] // 2
-                angular_z = -0.005 * (cx - center_x)
-                
-                if estimated_distance > self.target_distance + self.hysteresis:
-                    twist.linear.x = self.approach_speed
-                    twist.angular.z = angular_z
-                elif estimated_distance < self.target_distance - self.hysteresis:
-                    twist.linear.x = -0.05  # Leicht zurückfahren
-                else:
-                    self.state = "STOPPED"
-                    self.get_logger().info("Ziel erreicht! Halte an")
-            
-            elif self.state == "STOPPED":
-                pass  # Keine Bewegung
-                
-            self.cmd_vel_pub.publish(twist)
-            
-            # Debug-Ansicht
-            cv2.drawContours(cv_image, [largest_contour], -1, (0,255,0), 2) if largest_contour else None
-            cv2.imshow("Kamera", cv_image)
-            cv2.waitKey(1)
-            
-        except Exception as e:
-            self.get_logger().error(f"Fehler: {str(e)}")
-            self.state = "SEARCHING"
+        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+
+        fg_mask = self.back_sub.apply(frame)
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, self.kernel)
+        fg_mask = cv2.medianBlur(fg_mask, 5)
+        _, fg_mask = cv2.threshold(fg_mask, 127, 255, cv2.THRESH_BINARY)
+
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        areas = [cv2.contourArea(c) for c in contours]
+
+        if len(areas) < 1:
+            self.publish_image(frame)
+            return
+
+        max_index = np.argmax(areas)
+        cnt = contours[max_index]
+        x, y, w, h = cv2.boundingRect(cnt)
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 3)
+
+        x2 = x + int(w/2)
+        y2 = y + int(h/2)
+        cv2.circle(frame, (x2, y2), 4, (0, 255, 0), -1)
+
+        text = "x: " + str(x2) + ", y: " + str(y2)
+        cv2.putText(frame, text, (x2 - 10, y2 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        self.publisher_.publish(String(data=text))
+
+        self.publish_image(frame)
+
+    def publish_image(self, frame):
+        image_message = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+        self.image_publisher_.publish(image_message)
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ColorDetectorNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    
-    # Cleanup
-    cv2.destroyAllWindows()
-    node.destroy_node()
+    object_tracker = ObjectTracker()
+    rclpy.spin(object_tracker)
+    object_tracker.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':

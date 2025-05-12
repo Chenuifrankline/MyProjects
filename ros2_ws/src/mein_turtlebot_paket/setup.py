@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'turtlebot_forward_node = mein_turtlebot_paket.turtlebot_forward_node:main',
+            'colour_detection = mein_turtlebot_paket.colour_detection:main'
         ],
     },
 )

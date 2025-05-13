@@ -142,10 +142,7 @@ class ColorDetectorNode(Node):
                                 twist_msg.angular.z = 0.0
                                 self.get_logger().info('Ziel erreicht!')
                                 
-                                # Nach dem Anhalten beginnen wir zu drehen
-                                self.state = "TURNING"
-                                self.turn_start_time = time.time()
-                                twist_msg.angular.z = 1.0  # Start der Drehung
+                                
                 else:
                     # Kein rotes Objekt gefunden
                     self.target_detected = False

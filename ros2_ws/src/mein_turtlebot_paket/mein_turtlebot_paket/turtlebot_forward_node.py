@@ -37,7 +37,10 @@ class ColorDetectorNode(Node):
         self.target_detected = False
         self.is_turning = False
         self.turn_start_time = None
-        self.state = "SEARCHING"  # SEARCHING, APPROACHING, STOPPING, TURNING
+        
+        # Initialer Zustand: Anfangsdrehung
+        self.state = "INITIAL_ROTATION"
+        self.initial_rotation_start_time = time.time()
         
         # Parameter für die Farbdetektion (Rot in HSV)
         # Rot ist in HSV an den Rändern des H-Kanals, daher zwei Bereiche
@@ -47,20 +50,20 @@ class ColorDetectorNode(Node):
         self.upper_red2 = np.array([180, 255, 255])
         
         # Schwellenwerte
-        self.min_contour_area = 2000  # Minimale Fläche für Erkennung
-        self.target_distance = 0.2  # Zieldistanz in Metern
+        self.min_contour_area = 1000  # Erhöhte Mindestfläche für größere rote Objekte
+        self.target_distance = 0.2  # Zieldistanz in Metern (20cm)
         self.distance_tolerance = 0.05  # Toleranz in Metern
         
-        self.get_logger().info('Color Detector Node wurde initialisiert')
+        # Variable für das größte gefundene rote Objekt während der initialen Rotation
+        self.largest_detected_area = 0
+        self.best_contour = None
+        
+        self.get_logger().info('Color Detector Node wurde initialisiert - Beginne mit initialer Drehung')
 
     def image_callback(self, msg):
         try:
             # Konvertiere ROS-Bild zu OpenCV-Format
-            # Explizites Konvertieren zu bgr8, falls die Kamera ein anderes Format sendet
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-            
-            # Debug-Info ausgeben
-            self.get_logger().info(f'Bild empfangen: Format={msg.encoding}, Größe={msg.width}x{msg.height}')
             
             # Konvertiere Bild zu HSV für bessere Farberkennung
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
@@ -76,34 +79,41 @@ class ColorDetectorNode(Node):
             # Initialisiere Nachricht für Bewegungsbefehle
             twist_msg = Twist()
             
-            # Wenn wir gerade dabei sind, uns zu drehen
-            if self.state == "TURNING":
-                current_time = time.time()
-                # Vollständige Drehung (ca. 6 Sekunden bei 1.0 rad/s)
-                if current_time - self.turn_start_time > 6.0:  
-                    self.state = "SEARCHING"
-                    twist_msg.angular.z = 0.0
-                    self.get_logger().info('Drehung abgeschlossen, zurück zum Suchen')
-                else:
-                    twist_msg.angular.z = 1.0  # Weiterdrehen
+            # Suche nach dem größten roten Objekt
+            largest_contour = None
+            largest_area = 0
             
-            # Sonst nach rotem Ziel suchen und entsprechend handeln
-            else:
-                # Suche nach dem größten roten Objekt
-                largest_contour = None
-                largest_area = 0
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > largest_area and area > self.min_contour_area:
+                    largest_area = area
+                    largest_contour = contour
+            
+            # Zustandsmaschine für Roboterverhalten
+            if self.state == "INITIAL_ROTATION":
+                current_time = time.time()
                 
-                for contour in contours:
-                    area = cv2.contourArea(contour)
-                    if area > largest_area and area > self.min_contour_area:
-                        largest_area = area
-                        largest_contour = contour
-                
-                if largest_contour is not None:
-                    # Ziel gefunden
-                    self.target_detected = True
+                # Vollständige Drehung (ca. 6 Sekunden bei 1.0 rad/s)
+                if current_time - self.initial_rotation_start_time > 3.0:
+                    self.state = "APPROACHING_BEST_TARGET"
+                    twist_msg.angular.z = 0.0
+                    self.get_logger().info('Initiale Drehung abgeschlossen, fahre zum größten roten Objekt')
+                else:
+                    # Während der Drehung nach dem größten roten Objekt suchen
+                    twist_msg.angular.z = 1.0  # Drehen
                     
-                    # Berechne Momentane (Schwerpunkt)
+                    if largest_contour is not None and largest_area > self.largest_detected_area:
+                        self.largest_detected_area = largest_area
+                        self.best_contour = largest_contour
+                        self.get_logger().info(f'Neues größtes rotes Objekt gefunden: Fläche={largest_area}')
+            
+            elif self.state == "APPROACHING_BEST_TARGET":
+                # Wenn wir ein Ziel haben, drehen wir uns wieder, bis wir es finden
+                if self.best_contour is not None and largest_contour is None:
+                    twist_msg.angular.z = 0.5  # Langsam drehen, um das beste Ziel wieder zu finden
+                    self.get_logger().info('Suche nach dem besten Ziel...')
+                elif largest_contour is not None:
+                    # Wenn wir ein rotes Objekt sehen, berechnen wir den Schwerpunkt
                     M = cv2.moments(largest_contour)
                     if M["m00"] > 0:
                         cx = int(M["m10"] / M["m00"])
@@ -120,38 +130,33 @@ class ColorDetectorNode(Node):
                         error_x = cx - center_x
                         
                         # Schätze die Entfernung basierend auf der Größe des Objekts
-                        # Je größer das Objekt, desto näher ist es
-                        # Dies ist eine einfache Annäherung und kann kalibriert werden
                         normalized_area = largest_area / (width * height)
                         estimated_distance = 1.0 / (normalized_area * 10 + 0.1)  # Anpassen nach Bedarf
                         
-                        self.get_logger().info(f'Rotes Objekt gefunden: Fläche={largest_area}, ' +
+                        self.get_logger().info(f'Rotes Objekt im Blick: Fläche={largest_area}, ' +
                                                f'Geschätzte Distanz={estimated_distance:.2f}m')
                         
-                        if self.state == "SEARCHING" or self.state == "APPROACHING":
-                            # Wenn wir das Ziel noch nicht erreicht haben
-                            if estimated_distance > self.target_distance + self.distance_tolerance:
-                                self.state = "APPROACHING"
-                                # Ausrichten und vorwärts bewegen
-                                twist_msg.angular.z = -float(error_x) / 500  # Proportionale Steuerung
-                                twist_msg.linear.x = 0.2  # Vorwärts mit moderater Geschwindigkeit
-                            else:
-                                # Wir sind am Ziel
-                                self.state = "STOPPING"
-                                twist_msg.linear.x = 0.0
-                                twist_msg.angular.z = 0.0
-                                self.get_logger().info('Ziel erreicht!')
-                                
-                                
+                        # Wenn wir das Ziel noch nicht erreicht haben
+                        if estimated_distance > self.target_distance + self.distance_tolerance:
+                            # Ausrichten und vorwärts bewegen
+                            twist_msg.angular.z = -float(error_x) / 500  # Proportionale Steuerung
+                            twist_msg.linear.x = 0.2  # Vorwärts mit moderater Geschwindigkeit
+                        else:
+                            # Wir sind 20cm vor dem Ziel
+                            self.state = "STOPPED"
+                            twist_msg.linear.x = 0.0
+                            twist_msg.angular.z = 0.0
+                            self.get_logger().info('Ziel erreicht! Angehalten 20cm vor dem roten Objekt')
                 else:
-                    # Kein rotes Objekt gefunden
-                    self.target_detected = False
-                    if self.state == "SEARCHING":
-                        # Langsam drehen, um nach Objekten zu suchen
-                        twist_msg.angular.z = 0.5
+                    # Kein rotes Objekt gefunden und kein bestes Ziel vorhanden
+                    twist_msg.angular.z = 0.5  # Weiter drehen und suchen
+            
+            elif self.state == "STOPPED":
+                # Wir bleiben stehen, keine Bewegung
+                twist_msg.linear.x = 0.0
+                twist_msg.angular.z = 0.0
             
             # Debug-Anzeige (nur aktivieren, wenn ein Display angeschlossen ist)
-            # Für Headless-Betrieb können Sie diese Zeilen auskommentieren
             try:
                 cv2.imshow("Camera View", cv_image)
                 cv2.imshow("Red Mask", red_mask)

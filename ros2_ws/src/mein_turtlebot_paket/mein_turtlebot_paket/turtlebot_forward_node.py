@@ -48,7 +48,7 @@ class ColorDetectorNode(Node):
         
         # Schwellenwerte
         self.min_contour_area = 2000  # Minimale Fläche für Erkennung
-        self.target_distance = 0.5  # Zieldistanz in Metern
+        self.target_distance = 0.2  # Zieldistanz in Metern
         self.distance_tolerance = 0.05  # Toleranz in Metern
         
         self.get_logger().info('Color Detector Node wurde initialisiert')

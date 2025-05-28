@@ -57,6 +57,10 @@ class ColorDetectorNode(Node):
         # Variable für das größte gefundene rote Objekt während der initialen Rotation
         self.largest_detected_area = 0
         self.best_contour = None
+
+        self.rotation_started = False
+        self.rotation_start_time = None
+        self.rotation_duration = math.pi / 0.5
         
         self.get_logger().info('Color Detector Node wurde initialisiert - Beginne mit initialer Drehung')
 
@@ -152,10 +156,21 @@ class ColorDetectorNode(Node):
                     twist_msg.angular.z = 0.5  # Weiter drehen und suchen
             
             elif self.state == "STOPPED":
-                # Wir bleiben stehen, keine Bewegung
-                twist_msg.linear.x = 0.0
-                twist_msg.angular.z = 0.0
-            
+                current_time = time.time()
+    
+                if not self.rotation_started:
+                    self.rotation_started = True
+                    self.rotation_start_time = current_time
+                    self.get_logger().info('Beginne 180°-Drehung...')
+                
+                elif current_time - self.rotation_start_time < self.rotation_duration:
+                    twist_msg.angular.z = 0.5  
+                    twist_msg.linear.x = 0.0
+                else:
+                    twist_msg.angular.z = 0.0
+                    twist_msg.linear.x = 0.0
+                    self.get_logger().info('Aktuelles Prozessende')
+                        
             # Debug-Anzeige (nur aktivieren, wenn ein Display angeschlossen ist)
             try:
                 cv2.imshow("Camera View", cv_image)

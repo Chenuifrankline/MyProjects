@@ -32,6 +32,11 @@ class ColorDetectorNode(Node):
             Twist,
             '/cmd_vel',
             10)
+        #Attribute für move_forward
+        self.distance = 2.0  # Distanz in Metern
+        self.linear_speed = 0.2  # m/s
+        self.duration = self.distance / self.linear_speed
+
             
         # Status-Variablen
         self.target_detected = False
@@ -51,7 +56,7 @@ class ColorDetectorNode(Node):
         
         # Schwellenwerte
         self.min_contour_area = 1000  # Erhöhte Mindestfläche für größere rote Objekte
-        self.target_distance = 0.2  # Zieldistanz in Metern (20cm)
+        self.target_distance = 0.1  # Zieldistanz in Metern (20cm)
         self.distance_tolerance = 0.05  # Toleranz in Metern
         
         # Variable für das größte gefundene rote Objekt während der initialen Rotation
@@ -61,6 +66,11 @@ class ColorDetectorNode(Node):
         self.rotation_started = False
         self.rotation_start_time = None
         self.rotation_duration = math.pi / 0.5
+        
+        # Neue Variablen für das Vorwärtsfahren und den Restart
+        self.forward_started = False
+        self.forward_start_time = None
+        self.forward_duration = 2.0 / 0.2  # 1 Meter bei 0.2 m/s = 5 Sekunden
         
         self.get_logger().info('Color Detector Node wurde initialisiert - Beginne mit initialer Drehung')
 
@@ -167,9 +177,38 @@ class ColorDetectorNode(Node):
                     twist_msg.angular.z = 0.5  
                     twist_msg.linear.x = 0.0
                 else:
+                    # 180°-Drehung abgeschlossen, beginne mit Vorwärtsfahren
+                    self.state = "MOVING_FORWARD"
                     twist_msg.angular.z = 0.0
                     twist_msg.linear.x = 0.0
-                    self.get_logger().info('Aktuelles Prozessende')
+                    self.get_logger().info('180°-Drehung abgeschlossen, fahre 1 Meter vorwärts...')
+            
+            elif self.state == "MOVING_FORWARD":
+                current_time = time.time()
+                
+                if not self.forward_started:
+                    self.forward_started = True
+                    self.forward_start_time = current_time
+                    self.get_logger().info('Beginne 1 Meter vorwärts zu fahren...')
+                
+                elif current_time - self.forward_start_time < self.forward_duration:
+                    twist_msg.linear.x = 0.2  # 1 Meter vorwärts fahren
+                    twist_msg.angular.z = 0.0
+                else:
+                    # Vorwärtsfahren abgeschlossen, starte Prozess von vorne
+                    twist_msg.linear.x = 0.0
+                    twist_msg.angular.z = 0.0
+                    self.get_logger().info('1 Meter vorwärts gefahren, starte Prozess von vorne!')
+                    
+                    # Reset aller Variablen für Neustart
+                    self.state = "INITIAL_ROTATION"
+                    self.initial_rotation_start_time = time.time()
+                    self.largest_detected_area = 0
+                    self.best_contour = None
+                    self.rotation_started = False
+                    self.rotation_start_time = None
+                    self.forward_started = False
+                    self.forward_start_time = None
                         
             # Debug-Anzeige (nur aktivieren, wenn ein Display angeschlossen ist)
             try:
@@ -184,6 +223,9 @@ class ColorDetectorNode(Node):
             
         except Exception as e:
             self.get_logger().error(f'Fehler bei der Bildverarbeitung: {str(e)}')
+
+
+
 
 def main(args=None):
     rclpy.init(args=args)

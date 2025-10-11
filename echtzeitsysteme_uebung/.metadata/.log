@@ -1,0 +1,45 @@
+!SESSION 2025-10-11 21:33:24.055 -----------------------------------------------
+eclipse.buildId=Version 1.19.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=de_DE
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 4 4 2025-10-11 21:34:13.070
+!MESSAGE CubeMX plugin appears to be active, Log4j initialization might be too late.
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2025-10-11 21:34:13.072
+!MESSAGE Log4j2 initialized with config file C:\Users\nicoh\STM32CubeIDE\workspace_1.19.0\echtzeitsysteme_uebung\.metadata\.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2025-10-11 21:34:17.514
+!MESSAGE Started RMI Server, listening on port 41337
+!SESSION 2025-10-11 21:36:05.224 -----------------------------------------------
+eclipse.buildId=Version 1.19.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=de_DE
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 4 4 2025-10-11 21:36:19.305
+!MESSAGE CubeMX plugin appears to be active, Log4j initialization might be too late.
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2025-10-11 21:36:19.306
+!MESSAGE Log4j2 initialized with config file C:\Users\nicoh\STM32CubeIDE\workspace_1.19.0\echtzeitsysteme_uebung\.metadata\.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2025-10-11 21:36:24.441
+!MESSAGE Started RMI Server, listening on port 41337
+!SESSION 2025-10-11 21:38:43.635 -----------------------------------------------
+eclipse.buildId=Version 1.19.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=win32, ARCH=x86_64, WS=win32, NL=de_DE
+Command-line arguments:  -os win32 -ws win32 -arch x86_64
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 4 4 2025-10-11 21:38:49.638
+!MESSAGE CubeMX plugin appears to be active, Log4j initialization might be too late.
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2025-10-11 21:38:49.639
+!MESSAGE Log4j2 initialized with config file C:\Users\nicoh\STM32CubeIDE\workspace_1.19.0\echtzeitsysteme_uebung\.metadata\.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2025-10-11 21:38:55.150
+!MESSAGE Started RMI Server, listening on port 41337

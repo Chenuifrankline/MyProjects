@@ -44,10 +44,8 @@
 #define PHASE_W_GPIO_PORT GPIOA
 #define PHASE_W_TIM_CHANNEL LL_TIM_CHANNEL_CH3
 
-#define RUN_THRESHOLD 500
-#define LOW_DUTY_CYCLE 200
-#define HIGH_DUTY_CYCLE 500
-#define DUTY_STEP 20
+#define DUTY_STEP 10
+#define AUTORELOAD_VALUE 2099
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,8 +55,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 
+//osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
-volatile uint8_t start_motor;
 volatile uint8_t start_phase = 0;
 static uint8_t commutationStep = 1;
 /* USER CODE END PV */
@@ -69,10 +67,6 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 void StartDefaultTask(void const *argument);
-void SetPhasePWM(uint32_t timerChannel, uint32_t dutyCycle);
-void motorTask(void *argument);
-void SetDutyPhaseAllCycles(uint32_t dutyCycle);
-void runMotor(void);
 
 /* USER CODE BEGIN PFP */
 
@@ -82,109 +76,117 @@ void runMotor(void);
 /* USER CODE BEGIN 0 */
 
 void SetPhasePWM(uint32_t timerChannel, uint32_t dutyCycle) {
-	LL_TIM_OC_SetCompare(TIM1, timerChannel, dutyCycle);
-}
- /*
-void SetDutyPhaseAllCycles(uint32_t dutyCycle) {
-	LL_TIM_OC_SetCompare(TIM1, PHASE_U_TIM_CHANNEL, dutyCycle);
-	LL_TIM_OC_SetCompare(TIM1, PHASE_V_TIM_CHANNEL, dutyCycle);
-	LL_TIM_OC_SetCompare(TIM1, PHASE_W_TIM_CHANNEL, dutyCycle);
-}
-*/
-
-void runMotor(void) {
-	switch (commutationStep) {
-	case 1:
-		SetPhasePWM(PHASE_U_TIM_CHANNEL, HIGH_DUTY_CYCLE);
-		SetPhasePWM(PHASE_V_TIM_CHANNEL, LOW_DUTY_CYCLE);
-		SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
+	switch (timerChannel) {
+	case LL_TIM_CHANNEL_CH1:
+		LL_TIM_OC_SetCompareCH1(TIM1, dutyCycle);
 		break;
-	case 2:
-		SetPhasePWM(PHASE_U_TIM_CHANNEL, HIGH_DUTY_CYCLE);
-		SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
-		SetPhasePWM(PHASE_W_TIM_CHANNEL, LOW_DUTY_CYCLE);
+	case LL_TIM_CHANNEL_CH2:
+		LL_TIM_OC_SetCompareCH2(TIM1, dutyCycle);
 		break;
-	case 3:
-		SetPhasePWM(PHASE_U_TIM_CHANNEL, LOW_DUTY_CYCLE);
-		SetPhasePWM(PHASE_V_TIM_CHANNEL, HIGH_DUTY_CYCLE);
-		SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
-		break;
-	case 4:
-		SetPhasePWM(PHASE_U_TIM_CHANNEL, 0);
-		SetPhasePWM(PHASE_V_TIM_CHANNEL, HIGH_DUTY_CYCLE);
-		SetPhasePWM(PHASE_W_TIM_CHANNEL, LOW_DUTY_CYCLE);
-		break;
-	case 5:
-		SetPhasePWM(PHASE_U_TIM_CHANNEL, LOW_DUTY_CYCLE);
-		SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
-		SetPhasePWM(PHASE_W_TIM_CHANNEL, HIGH_DUTY_CYCLE);
-		break;
-	case 6:
-		SetPhasePWM(PHASE_U_TIM_CHANNEL, 0);
-		SetPhasePWM(PHASE_V_TIM_CHANNEL, LOW_DUTY_CYCLE);
-		SetPhasePWM(PHASE_W_TIM_CHANNEL, HIGH_DUTY_CYCLE);
-		break;
-	default:
-		commutationStep = 1;
+	case LL_TIM_CHANNEL_CH3:
+		LL_TIM_OC_SetCompareCH3(TIM1, dutyCycle);
 		break;
 	}
-	commutationStep++;
-	if (commutationStep > 6) {
-		commutationStep = 1;
+}
+/*
+ void SetDutyPhaseAllCycles(uint32_t dutyCycle) {
+ LL_TIM_OC_SetCompare(TIM1, PHASE_U_TIM_CHANNEL, dutyCycle);
+ LL_TIM_OC_SetCompare(TIM1, PHASE_V_TIM_CHANNEL, dutyCycle);
+ LL_TIM_OC_SetCompare(TIM1, PHASE_W_TIM_CHANNEL, dutyCycle);
+ }
+ */
+
+void runMotor(void) {
+    static uint32_t duty = AUTORELOAD_VALUE * 0.2;  // start bei 20%
+    static int delta = DUTY_STEP;
+
+    switch (commutationStep) {
+    case 1:
+        // U aktiviert, V und W aus
+        SetPhasePWM(PHASE_U_TIM_CHANNEL, duty);
+        SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
+        break;
+    case 2:
+        // V aktiviert, U und W aus
+        SetPhasePWM(PHASE_U_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_V_TIM_CHANNEL, duty);
+        SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
+        break;
+    case 3:
+        // W aktiviert, U und V aus
+        SetPhasePWM(PHASE_U_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_W_TIM_CHANNEL, duty);
+        break;
+    case 4:
+        // U aktiviert, W aus, V wieder aus (falls Drehrichtung rückwärts)
+        SetPhasePWM(PHASE_U_TIM_CHANNEL, duty);
+        SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
+        break;
+    case 5:
+        // V aktiviert, W aus, U wieder aus (gekreuzt, um Bewegungsrichtung zu ändern)
+        SetPhasePWM(PHASE_U_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_V_TIM_CHANNEL, duty);
+        SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
+        break;
+    case 6:
+        // W aktiv, U und V aus (auch für Rückwärtsdrehung)
+        SetPhasePWM(PHASE_U_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
+        SetPhasePWM(PHASE_W_TIM_CHANNEL, duty);
+        break;
+    default:
+        commutationStep = 1;
+        break;
+    }
+
+    commutationStep++;
+    if (commutationStep > 6) {
+        commutationStep = 1;
+    }
+
+    // Duty Cycle zwischen 20% und 40% langsam ändern
+    if (duty >= AUTORELOAD_VALUE * 0.4) {
+        delta = -DUTY_STEP;
+    } else if (duty <= AUTORELOAD_VALUE * 0.2) {
+        delta = DUTY_STEP;
+    }
+    duty += delta;
+
+    vTaskDelay(pdMS_TO_TICKS(150)); // langsam, z.B. 150ms Pause zwischen Schritten
+}
+
+
+void DebugTask(void *argument) {
+	for (;;) {
+		SetPhasePWM(PHASE_U_TIM_CHANNEL, AUTORELOAD_VALUE / 2); // Phase U auf High
+		SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);                 // Phase V aus
+		SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);                 // Phase W aus
+
+		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
 }
 
 void motorTask(void *argument) {
-	uint32_t duty_cycle = 0;
-	TickType_t start_timer;
-	enum {
-		STATE_IDLE, STATE_START, STATE_RUN, STATE_STOP
-	} state = STATE_IDLE;
-
-	for (;;) {
-		switch (state) {
-		case STATE_IDLE:
-			//Wait for Startsignal --> Pin high wenn knopfdruck
-			if (start_motor == 1) {
-				start_motor = 0;
-				state = STATE_START;
-			}
-			break;
-		case STATE_START:
-			//Initiale Ansteuerung
-			if (start_phase == 0) {
-				SetPhasePWM(PHASE_U_TIM_CHANNEL, LOW_DUTY_CYCLE);
-				SetPhasePWM(PHASE_V_TIM_CHANNEL, 0);
-				SetPhasePWM(PHASE_W_TIM_CHANNEL, 0);
-				start_phase++;
-				start_timer = xTaskGetTickCount();
-
-			}
-			//warte eine sekunde
-			else if (xTaskGetTickCount() - start_timer < pdMS_TO_TICKS(1000)) {
-
-			} else {
-				duty_cycle = LOW_DUTY_CYCLE;
-				duty_cycle += DUTY_STEP;
-				SetPhasePWM(PHASE_U_TIM_CHANNEL, duty_cycle);
-
-
-				if (duty_cycle >= RUN_THRESHHOLD) {
-					state = STATE_RUN;
-				}
-			}
-			break;
-		case STATE_RUN:
-			//Motor laufen lassen
-			RunMotor();
-			break;
-		case STATE_STOP:
-			//Motor anhalten und zurücksetzen;
-			break;
-		}
-		vTaskDelay(pdMS_TO_TICKS(10));
-	}
+    enum { STATE_IDLE, STATE_RUN } state = STATE_IDLE;
+    for (;;) {
+        switch (state) {
+        case STATE_IDLE:
+            if (start_motor == 1) {
+                start_motor = 0;
+                state = STATE_RUN;
+            }
+            break;
+        case STATE_RUN:
+            runMotor();
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
 }
+
 /* USER CODE END 0 */
 
 /**
@@ -229,7 +231,14 @@ int main(void) {
 	MX_USART2_UART_Init();
 	MX_TIM1_Init();
 	/* USER CODE BEGIN 2 */
+	LL_TIM_CC_EnableChannel(TIM1, LL_TIM_CHANNEL_CH1);
+	LL_TIM_CC_EnableChannel(TIM1, LL_TIM_CHANNEL_CH2);
+	LL_TIM_CC_EnableChannel(TIM1, LL_TIM_CHANNEL_CH3);
+	LL_TIM_EnableAllOutputs(TIM1);
+	LL_TIM_EnableCounter(TIM1);
+
 	xTaskCreate(motorTask, "Task1", 256, NULL, 1, NULL);
+	//xTaskCreate(DebugTask, "Task1", 256, NULL, 1, NULL);
 	/* USER CODE END 2 */
 
 	/* USER CODE BEGIN RTOS_MUTEX */
@@ -250,13 +259,15 @@ int main(void) {
 
 	/* Create the thread(s) */
 	/* definition and creation of defaultTask */
-
+	//osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
+	//defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 	/* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
 	/* USER CODE END RTOS_THREADS */
 
 	/* Start scheduler */
-	xTaskStartScheduler();
+	// osKernelStart();
+	vTaskStartScheduler();
 
 	/* We should never get here as control is now taken by the scheduler */
 
@@ -332,15 +343,14 @@ static void MX_TIM1_Init(void) {
 	LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
 
 	/* USER CODE BEGIN TIM1_Init 1 */
-
 	/* USER CODE END TIM1_Init 1 */
-	TIM_InitStruct.Prescaler = 16;
+	TIM_InitStruct.Prescaler = 2;
 	TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
-	TIM_InitStruct.Autoreload = 65535;
+	TIM_InitStruct.Autoreload = AUTORELOAD_VALUE;
 	TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
 	TIM_InitStruct.RepetitionCounter = 0;
 	LL_TIM_Init(TIM1, &TIM_InitStruct);
-	LL_TIM_DisableARRPreload(TIM1);
+	LL_TIM_EnableARRPreload(TIM1);
 	LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH1);
 	TIM_OC_InitStruct.OCMode = LL_TIM_OCMODE_PWM1;
 	TIM_OC_InitStruct.OCState = LL_TIM_OCSTATE_DISABLE;

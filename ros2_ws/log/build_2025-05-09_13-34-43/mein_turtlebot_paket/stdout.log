@@ -1,0 +1,19 @@
+running egg_info
+writing ../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/PKG-INFO
+writing dependency_links to ../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/dependency_links.txt
+writing entry points to ../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/entry_points.txt
+writing requirements to ../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/requires.txt
+writing top-level names to ../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/top_level.txt
+reading manifest file '../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/SOURCES.txt'
+writing manifest file '../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info/SOURCES.txt'
+running build
+running build_py
+running install
+running install_lib
+running install_data
+running install_egg_info
+removing '/home/local/ros2_ws/install/mein_turtlebot_paket/lib/python3.10/site-packages/mein_turtlebot_paket-0.0.1-py3.10.egg-info' (and everything under it)
+Copying ../../build/mein_turtlebot_paket/mein_turtlebot_paket.egg-info to /home/local/ros2_ws/install/mein_turtlebot_paket/lib/python3.10/site-packages/mein_turtlebot_paket-0.0.1-py3.10.egg-info
+running install_scripts
+Installing turtlebot_forward_node script to /home/local/ros2_ws/install/mein_turtlebot_paket/lib/mein_turtlebot_paket
+writing list of installed files to '/home/local/ros2_ws/build/mein_turtlebot_paket/install.log'

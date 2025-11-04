@@ -1,3 +1,0 @@
-[console_scripts]
-turtlebot_forward_node = mein_turtlebot_paket.turtlebot_forward_node:main
-
